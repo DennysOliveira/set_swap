@@ -320,6 +320,7 @@ local function OnLoad()
     }
     api.SaveSettings("set_swap", settings)
   end
+  settings.gear_sets = settings.gear_sets or {}
   renderGearSetUI()
 end
 
