@@ -339,7 +339,7 @@ local function OnUnload()
 end
 
 local function OnUpdate()
-  local cooldown = 5 -- Minimum delay threshold in milliseconds
+  local cooldown = 12 -- Minimum delay threshold in milliseconds
   local maxRetries = 3 -- Maximum number of retries for an item
 
   -- Check for enqueued items and equip them
