@@ -12,10 +12,16 @@ local mainCanvas
 local addNewSetCanvas
 local settings
 local enqueuedItems = {}
-local delay = 5 -- Update delay in milliseconds
+local isProcessingEquip = false
+local betweenItemDelay = 50 -- Minimum delay between equip attempts in milliseconds
+local retryDelay = 50 -- Minimum delay between equip attempts in milliseconds
+local maxRetries = 3 -- Maximum number of retries for an item
 local gearSetButtons = {}
 local addSetButton
 local widgetCounter = 0
+
+local processNextEquip -- forward declaration
+local toBeVerified = {}
 
 local function getUniqueWidgetId(prefix)
   widgetCounter = widgetCounter + 1
@@ -34,8 +40,13 @@ end
 local function equipTitle()
 end
 
-local function equipBagItem(slot)
-  api.Bag:EquipBagItem(slot, false)
+local function equipBagItem(slot, equipmentSlot)
+  local isAlt = false
+  if equipmentSlot == 13 or equipmentSlot == 11 or equipmentSlot == 17 then
+    isAlt = true
+  end
+
+  api.Bag:EquipBagItem(slot, isAlt)
 end
 
 -- Add retry tracking for re-enqueued items
@@ -56,6 +67,7 @@ local function enqueueItemEquip(item, bagSlot, equipmentSlot, retryCount)
 end
 
 local enqueueLoadoutEquipment = function(loadout)
+  api.Log:Info("enqueueLoadoutEquipment called for set: " .. (loadout.name or "<unnamed>"))
   local maxBagSlots = 150
   local loadoutItems = #loadout.gear
 
@@ -68,10 +80,17 @@ local enqueueLoadoutEquipment = function(loadout)
     for bagSlot = 1, maxBagSlots do
       local bagItem = api.Bag:GetBagItemInfo(1, bagSlot)
       if bagItem and bagItem.name == itemName and bagItem.itemGrade == itemGrade then
+        api.Log:Info("Enqueueing item: " .. itemName .. " (grade: " .. tostring(itemGrade) .. ", slot: " .. tostring(equipmentSlot) .. ") from bagSlot " .. tostring(bagSlot))
         enqueueItemEquip(bagItem, bagSlot, equipmentSlot, 0)
         break
       end
     end
+  end
+  api.Log:Info("enqueuedItems size after enqueue: " .. tostring(#enqueuedItems))
+  -- Start processing if not already
+  if not isProcessingEquip then
+    api.Log:Info("Starting processNextEquip from enqueueLoadoutEquipment")
+    processNextEquip()
   end
 end
 
@@ -338,64 +357,62 @@ local function OnUnload()
   end
 end
 
-local function OnUpdate()
-  local cooldown = 12 -- Minimum delay threshold in milliseconds
-  local maxRetries = 3 -- Maximum number of retries for an item
-
-  -- Check for enqueued items and equip them
-  if #enqueuedItems > 0 then
-    if delay < cooldown then
-      delay = delay + 1
-      return -- Wait for the next update cycle
-    end
-
-    local equipableItem = table.remove(enqueuedItems, 1)
-    equipBagItem(equipableItem.bagSlot)
-
-    -- Check if item was indeed equipped (delay might not be enough)
-    local equippedItem = api.Equipment:GetEquippedItemTooltipInfo(equipableItem.equipmentSlot)
-    
-    if not equippedItem or (equippedItem.name ~= equipableItem.item.name and equippedItem.itemGrade ~= equipableItem.item.grade) then
-      -- Check if we should retry or give up
-      if equipableItem.retryCount < maxRetries then
-        -- Re-enqueue with increased retry count and longer delay
-        equipableItem.retryCount = equipableItem.retryCount + 1
-        local retryDelay = cooldown * (2 ^ equipableItem.retryCount) -- Exponential backoff
-        delay = delay + retryDelay
-        
-        -- Re-enqueue at the end of the queue to give other items a chance
-        table.insert(enqueuedItems, equipableItem)
-      else
-        -- Max retries reached, give up on this item
-        api.Log:Error("Failed to equip item after " .. maxRetries .. " retries: " .. equipableItem.item.name)
-      end
-    else
-      -- Successfully equipped, reset delay
-      delay = 0
-    end
-    
-    -- If no more items in queue, re-enable all buttons
-    if #enqueuedItems == 0 then
-      enableAllGearSetButtons()
-    end
-  else
-    -- Safety check: if no items in queue but buttons are disabled, re-enable them
-    if #gearSetButtons > 0 then
-      local anyDisabled = false
-      for _, btn in ipairs(gearSetButtons) do
-        if btn and not btn:IsEnabled() then
-          anyDisabled = true
-          break
-        end
-      end
-      if anyDisabled then
-        enableAllGearSetButtons()
-      end
-    end
+function processNextEquip()
+  api.Log:Info("processNextEquip called. Queue size: " .. tostring(#enqueuedItems))
+  if #enqueuedItems == 0 then
+    isProcessingEquip = false
+    api.Log:Info("No more items to equip. Moving to verification phase.")
+    verifyEquippedItems()
+    return
   end
+
+  isProcessingEquip = true
+  local equipableItem = table.remove(enqueuedItems, 1)
+  api.Log:Info("Attempting to equip: " .. equipableItem.item.name .. " (grade: " .. tostring(equipableItem.item.grade) .. ", slot: " .. tostring(equipableItem.equipmentSlot) .. ", retry: " .. tostring(equipableItem.retryCount) .. ") from bagSlot " .. tostring(equipableItem.bagSlot))
+  equipBagItem(equipableItem.bagSlot, equipableItem.equipmentSlot)
+  table.insert(toBeVerified, equipableItem)
+  api:DoIn(betweenItemDelay, processNextEquip)
 end
 
-api.On("UPDATE", OnUpdate)
+function verifyEquippedItems()
+  api.Log:Info("verifyEquippedItems called. Items to verify: " .. tostring(#toBeVerified))
+  if #toBeVerified == 0 then
+    api.Log:Info("Verification complete. Re-enabling buttons.")
+    isProcessingEquip = false
+    enableAllGearSetButtons()
+    return
+  end
+
+  local itemsToRetry = {}
+  for _, item in ipairs(toBeVerified) do
+    local equippedItem = api.Equipment:GetEquippedItemTooltipInfo(item.equipmentSlot)
+    if not equippedItem or (equippedItem.name ~= item.item.name or equippedItem.itemGrade ~= item.item.grade) then
+      if item.retryCount < maxRetries then
+        item.retryCount = item.retryCount + 1
+        api.Log:Info("Verification failed, re-enqueueing (" .. tostring(item.retryCount) .. "/" .. tostring(maxRetries) .. ") for item: " .. item.item.name)
+        table.insert(itemsToRetry, item)
+      else
+        api.Log:Error("Failed to equip item after " .. maxRetries .. " retries: " .. item.item.name)
+      end
+    else
+      api.Log:Info("Verified equipped: " .. item.item.name)
+    end
+  end
+  toBeVerified = {}
+
+  if #itemsToRetry > 0 then
+    for _, item in ipairs(itemsToRetry) do
+      table.insert(enqueuedItems, 1, item)
+    end
+    isProcessingEquip = true
+    api.Log:Info("Reprocessing enqueued items after verification.")
+    api:DoIn(retryDelay, processNextEquip)
+  else
+    api.Log:Info("No more items to process after verification. Re-enabling buttons.")
+    isProcessingEquip = false
+    enableAllGearSetButtons()
+  end
+end
 
 set_swap.OnUnload = OnUnload
 set_swap.OnLoad = OnLoad
