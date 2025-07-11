@@ -52,7 +52,7 @@ end
 -- Add retry tracking for re-enqueued items
 local function enqueueItemEquip(item, bagSlot, equipmentSlot, retryCount)
   if not item or not bagSlot then
-    api.Log:Error("enqueueItemEquip called with nil item or bagSlot")
+    -- api.Log:Info("enqueueItemEquip called with nil item or bagSlot")
     return
   end
 
@@ -67,7 +67,7 @@ local function enqueueItemEquip(item, bagSlot, equipmentSlot, retryCount)
 end
 
 local enqueueLoadoutEquipment = function(loadout)
-  api.Log:Info("enqueueLoadoutEquipment called for set: " .. (loadout.name or "<unnamed>"))
+  -- api.Log:Info("enqueueLoadoutEquipment called for set: " .. (loadout.name or "<unnamed>"))
   local maxBagSlots = 150
   local loadoutItems = #loadout.gear
 
@@ -80,16 +80,16 @@ local enqueueLoadoutEquipment = function(loadout)
     for bagSlot = 1, maxBagSlots do
       local bagItem = api.Bag:GetBagItemInfo(1, bagSlot)
       if bagItem and bagItem.name == itemName and bagItem.itemGrade == itemGrade then
-        api.Log:Info("Enqueueing item: " .. itemName .. " (grade: " .. tostring(itemGrade) .. ", slot: " .. tostring(equipmentSlot) .. ") from bagSlot " .. tostring(bagSlot))
+        -- api.Log:Info("Enqueueing item: " .. itemName .. " (grade: " .. tostring(itemGrade) .. ", slot: " .. tostring(equipmentSlot) .. ") from bagSlot " .. tostring(bagSlot))
         enqueueItemEquip(bagItem, bagSlot, equipmentSlot, 0)
         break
       end
     end
   end
-  api.Log:Info("enqueuedItems size after enqueue: " .. tostring(#enqueuedItems))
+  -- api.Log:Info("enqueuedItems size after enqueue: " .. tostring(#enqueuedItems))
   -- Start processing if not already
   if not isProcessingEquip then
-    api.Log:Info("Starting processNextEquip from enqueueLoadoutEquipment")
+    -- api.Log:Info("Starting processNextEquip from enqueueLoadoutEquipment")
     processNextEquip()
   end
 end
@@ -358,26 +358,26 @@ local function OnUnload()
 end
 
 function processNextEquip()
-  api.Log:Info("processNextEquip called. Queue size: " .. tostring(#enqueuedItems))
+  -- api.Log:Info("processNextEquip called. Queue size: " .. tostring(#enqueuedItems))
   if #enqueuedItems == 0 then
     isProcessingEquip = false
-    api.Log:Info("No more items to equip. Moving to verification phase.")
+    -- api.Log:Info("No more items to equip. Moving to verification phase.")
     verifyEquippedItems()
     return
   end
 
   isProcessingEquip = true
   local equipableItem = table.remove(enqueuedItems, 1)
-  api.Log:Info("Attempting to equip: " .. equipableItem.item.name .. " (grade: " .. tostring(equipableItem.item.grade) .. ", slot: " .. tostring(equipableItem.equipmentSlot) .. ", retry: " .. tostring(equipableItem.retryCount) .. ") from bagSlot " .. tostring(equipableItem.bagSlot))
+  -- api.Log:Info("Attempting to equip: " .. equipableItem.item.name .. " (grade: " .. tostring(equipableItem.item.grade) .. ", slot: " .. tostring(equipableItem.equipmentSlot) .. ", retry: " .. tostring(equipableItem.retryCount) .. ") from bagSlot " .. tostring(equipableItem.bagSlot))
   equipBagItem(equipableItem.bagSlot, equipableItem.equipmentSlot)
   table.insert(toBeVerified, equipableItem)
   api:DoIn(betweenItemDelay, processNextEquip)
 end
 
 function verifyEquippedItems()
-  api.Log:Info("verifyEquippedItems called. Items to verify: " .. tostring(#toBeVerified))
+  -- api.Log:Info("verifyEquippedItems called. Items to verify: " .. tostring(#toBeVerified))
   if #toBeVerified == 0 then
-    api.Log:Info("Verification complete. Re-enabling buttons.")
+    -- api.Log:Info("Verification complete. Re-enabling buttons.")
     isProcessingEquip = false
     enableAllGearSetButtons()
     return
@@ -389,13 +389,13 @@ function verifyEquippedItems()
     if not equippedItem or (equippedItem.name ~= item.item.name or equippedItem.itemGrade ~= item.item.grade) then
       if item.retryCount < maxRetries then
         item.retryCount = item.retryCount + 1
-        api.Log:Info("Verification failed, re-enqueueing (" .. tostring(item.retryCount) .. "/" .. tostring(maxRetries) .. ") for item: " .. item.item.name)
+        -- api.Log:Info("Verification failed, re-enqueueing (" .. tostring(item.retryCount) .. "/" .. tostring(maxRetries) .. ") for item: " .. item.item.name)
         table.insert(itemsToRetry, item)
       else
-        api.Log:Error("Failed to equip item after " .. maxRetries .. " retries: " .. item.item.name)
+        -- api.Log:Info("Failed to equip item after " .. maxRetries .. " retries: " .. item.item.name)
       end
     else
-      api.Log:Info("Verified equipped: " .. item.item.name)
+      -- api.Log:Info("Verified equipped: " .. item.item.name)
     end
   end
   toBeVerified = {}
@@ -405,10 +405,10 @@ function verifyEquippedItems()
       table.insert(enqueuedItems, 1, item)
     end
     isProcessingEquip = true
-    api.Log:Info("Reprocessing enqueued items after verification.")
+    -- api.Log:Info("Reprocessing enqueued items after verification.")
     api:DoIn(retryDelay, processNextEquip)
   else
-    api.Log:Info("No more items to process after verification. Re-enabling buttons.")
+    -- api.Log:Info("No more items to process after verification. Re-enabling buttons.")
     isProcessingEquip = false
     enableAllGearSetButtons()
   end
