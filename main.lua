@@ -15,7 +15,7 @@ local enqueuedItems = {}
 local isProcessingEquip = false
 local betweenItemDelay = 100 -- Minimum delay between equip attempts in milliseconds
 local retryDelay = 50       -- Minimum delay between equip attempts in milliseconds
-local maxRetries = 3        -- Maximum number of retries for an item
+local maxRetries = 1       -- Maximum number of retries for an item
 local gearSetButtons = {}
 local addSetButton
 local widgetCounter = 0
@@ -156,30 +156,28 @@ local function renderGearSetUI()
 
   mainCanvas:SetHandler("OnDragStop", mainCanvas.OnDragStop)
 
-  -- Improved canvas size calculation
+  -- Canvas and button layout parameters
   local baseCanvasWidth = 90
   local baseCanvasHeight = 40
-  local buttonBaseWidth = 70
-  local buttonGap = 0
+  local buttonBaseWidth = 70  -- Initial width, will be adjusted by skin handler
+  local buttonGap = 5         -- Gap between gear set buttons
   local leftPadding = 9
   local rightPadding = 9
   local addButtonExtraGap = 10
 
   local numGearSets = settings.gear_sets and #settings.gear_sets or 0
 
-  -- Calculate total width needed for all buttons
-  local totalButtonWidth = numGearSets * buttonBaseWidth
-  local totalGapWidth = (numGearSets > 1) and (numGearSets - 1) * buttonGap or 0
-  local requiredWidth = leftPadding + totalButtonWidth + totalGapWidth + rightPadding
+  -- Set initial canvas size (will be updated after buttons are created)
+  mainCanvas:SetExtent(baseCanvasWidth, baseCanvasHeight)
 
-  mainCanvas:SetExtent(requiredWidth + baseCanvasWidth, baseCanvasHeight)
+  local dynamicButtonsWidth = 0
 
   -- Recreate gear set buttons with unique IDs
   for i, gear_set in ipairs(settings.gear_sets) do
     local buttonId = getUniqueWidgetId("gearSetButton")
 
-    -- Calculate button X position: leftPadding + (button width + gap) * (i-1)
-    local buttonX = leftPadding + (buttonBaseWidth + buttonGap) * (i - 1)
+    -- Calculate button X position using accumulated width
+    local buttonX = leftPadding + dynamicButtonsWidth
 
     local setBtn = ui.createButton(
       buttonId,
@@ -190,6 +188,10 @@ local function renderGearSetUI()
       buttonBaseWidth,
       30
     )
+
+    -- Get the actual width of the button after skin is applied
+    local actualButtonWidth = setBtn:GetWidth()
+    dynamicButtonsWidth = dynamicButtonsWidth + actualButtonWidth + buttonGap
 
     -- Set up button handlers
     setBtn.OnClick = function()
@@ -235,8 +237,8 @@ local function renderGearSetUI()
   local addButtonId = getUniqueWidgetId("addSetButton")
 
   local useExtraGap = numGearSets > 0 and addButtonExtraGap or 0
-  -- Position add button after the last gear set button
-  local addButtonX = leftPadding + (buttonBaseWidth + buttonGap) * numGearSets + useExtraGap
+  -- Position add button after the last gear set button using accumulated dynamic width
+  local addButtonX = leftPadding + dynamicButtonsWidth + useExtraGap
 
   addSetButton = ui.createButton(
     addButtonId,
@@ -262,6 +264,11 @@ local function renderGearSetUI()
 
   addSetButton:SetHandler("OnEnter", addSetButton.OnEnter)
   addSetButton:SetHandler("OnLeave", addSetButton.OnLeave)
+
+  -- Update canvas size based on actual button widths
+  local addButtonWidth = addSetButton:GetWidth()
+  local totalRequiredWidth = leftPadding + dynamicButtonsWidth + addButtonWidth + rightPadding + useExtraGap
+  mainCanvas:SetExtent(totalRequiredWidth, baseCanvasHeight)
 
   local function saveNewSet(setNameInput)
     local setName = ""
@@ -364,7 +371,30 @@ function processNextEquip()
   local equipableItem = table.remove(enqueuedItems, 1)
 
   equipBagItem(equipableItem.bagSlot, equipableItem.equipmentSlot)
-  api:DoIn(betweenItemDelay, processNextEquip)
+
+  -- Check if item was equipped after the delay
+  api:DoIn(retryDelay, function()
+    local equippedItem = api.Equipment:GetEquippedItemTooltipInfo(equipableItem.equipmentSlot)
+    local wasEquipped = false
+    
+    -- Check if the correct item is now equipped
+    if equippedItem and equippedItem.name == equipableItem.item.name and equippedItem.itemGrade == equipableItem.item.itemGrade then
+      wasEquipped = true
+    end
+    
+    -- If not equipped and we haven't exceeded max retries, try again
+    if not wasEquipped and equipableItem.retryCount < maxRetries then
+      equipableItem.retryCount = equipableItem.retryCount + 1
+      -- Re-enqueue the item at the front of the queue to retry immediately
+      table.insert(enqueuedItems, 1, equipableItem)
+      -- Continue processing with a shorter delay for retry
+      api:DoIn(retryDelay, processNextEquip)
+    else
+      -- Item was equipped or max retries reached, move to next item
+      api:DoIn(betweenItemDelay, processNextEquip())
+    end
+  end)
+
 end
 
 set_swap.OnUnload = OnUnload
