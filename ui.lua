@@ -5,30 +5,12 @@ local function createButton(id, parent, text, x, y, width, height, anchor)
     button:AddAnchor(anchor or "TOPLEFT", x, y)
     button:SetText(text)
 
-    local buttonSkin = {
-        path = "ui/common/default.dds",
-        drawableType = "ninePart",
-        coordsKey = "btn",
-        autoResize = true,
-        fontSize = 12,
-        fontInset = {
-            left = 11,
-            right = 11,
-            top = 0,
-            bottom = 0
-        },
-        useSameTexture = false, -- Uses multiple states (_df, _ov, _on, _dis)
-    }
+    local skin = BUTTON_BASIC.DEFAULT
+    skin.width = width or 80
+    skin.height = height or 30
 
-    -- Let the styling engine compute width/height from texture unless manually specified
-    if width then
-        buttonSkin.width = width
-    end
-    if height then
-        buttonSkin.height = height
-    end
+    api.Interface:ApplyButtonSkin(button, skin)
 
-    api.Interface:ApplyButtonSkin(button, buttonSkin)
     button:Show(true)
 
     return button
